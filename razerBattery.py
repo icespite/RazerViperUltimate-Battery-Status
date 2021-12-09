@@ -37,18 +37,30 @@ status = TrackStatus()
 
 
 def getBatteryStats():
-    device_manager = DeviceManager()
-    # print(device_manager.devices)
-    viper = None
     try:
+        device_manager = DeviceManager()
+    # print(device_manager.devices)
+        viper = None
         for device in device_manager.devices:
-            # print(device,device.name,device.battery_level)
+            print(device,device.name,device.battery_level)
             if "Razer Viper Ultimate (Wired)" == device.name:
                 viper = device
                 break
             elif "Razer Viper Ultimate (Wireless)" == device.name:
                 viper = device
-        # print("-"*20)
+        print("-"*20)
+        if viper.battery_level == 0:
+            print("batteery_level equal zero")
+            os.system("openrazer-daemon -s")
+            time.sleep(3)
+            device_manager = DeviceManager()
+            for device in device_manager.devices:
+                print(device,device.name,device.battery_level)
+                if "Razer Viper Ultimate (Wired)" == device.name:
+                    viper = device
+                    break
+                elif "Razer Viper Ultimate (Wireless)" == device.name:
+                    viper = device
         if None == viper:
             return False, -1, "not found viper"
 
@@ -141,7 +153,7 @@ async def main():
     await refreshBatteryStatus(razer_command)
 
     print("Closing Razer Tray...")
-
+    return
 
 def clearOldDaemon():
     f = os.popen("ps -ef |grep openrazer-daemon")
