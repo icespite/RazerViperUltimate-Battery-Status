@@ -1,15 +1,15 @@
 #!/bin/env python3
 import time
-
+from gi.repository import Gtk as gtk, AppIndicator3 as appindicator
 from plyer import notification
 import threading
 import asyncio
 from openrazer.client import DeviceManager
 import gi
+import os
 
-gi.require_version('Gtk', '3.0')
-gi.require_version('AppIndicator3', '0.1')
-from gi.repository import Gtk as gtk, AppIndicator3 as appindicator
+gi.require_version("Gtk", "3.0")
+gi.require_version("AppIndicator3", "0.1")
 
 LOW_POWER = 46
 REFRESH_TIME_INTERVAL = 3
@@ -38,6 +38,7 @@ status = TrackStatus()
 
 def getBatteryStats():
     device_manager = DeviceManager()
+    # print(device_manager.devices)
     viper = None
     try:
         for device in device_manager.devices:
@@ -48,17 +49,6 @@ def getBatteryStats():
             elif "Razer Viper Ultimate (Wireless)" == device.name:
                 viper = device
         # print("-"*20)
-        # fix power equal zero when change to wired
-        if viper.battery_level ==0:
-            time.sleep(3)
-            device_manager = DeviceManager()
-            for device in device_manager.devices:
-                if "Razer Viper Ultimate (Wired)" == device.name:
-                    viper = device
-                    break
-                elif "Razer Viper Ultimate (Wireless)" == device.name:
-                    viper = device
-
         if None == viper:
             return False, -1, "not found viper"
 
@@ -77,16 +67,16 @@ def getBatteryStats():
 def sendNotification(isCharging, percentage):
     if not isCharging and percentage < LOW_POWER and not status.getIsWarned():
         notification.notify(
-                # title of the notification,
-                title="Razer Mouse Low Battery",
-                # the body of the notification
-                message="{}%".format(percentage),
-                # creating icon for the notification
-                # we need to download a icon of ico file format
-                app_icon=r"/home/icespite/Work/PycharmProjects/RazerViperUltimate-Battery-Status/razer-logo.png",
-                # the notification stays for 10sec
-                timeout=60
-            )
+            # title of the notification,
+            title="Razer Mouse Low Battery",
+            # the body of the notification
+            message="{}%".format(percentage),
+            # creating icon for the notification
+            # we need to download a icon of ico file format
+            app_icon=r"/home/icespite/Work/PycharmProjects/RazerViperUltimate-Battery-Status/razer-logo.png",
+            # the notification stays for 10sec
+            timeout=60,
+        )
         status.setIsWarned(True)
 
 
@@ -107,7 +97,10 @@ async def refreshBatteryStatus(razer_command):
 
 def quit(_):
     status.setNotRunning()
-    print('Quitting...')
+    print("Quitting...")
+    # openrazer-damon's number bigger than 1 will cause can't find wired device
+    device_manager = DeviceManager()
+    device_manager.stop_daemon()
     gtk.main_quit()
 
 
@@ -119,8 +112,8 @@ def menu():
     menu.append(razer_command)
 
     exittray = gtk.MenuItem()
-    exittray.set_label('Exit Tray')
-    exittray.connect('activate', quit)
+    exittray.set_label("Exit Tray")
+    exittray.connect("activate", quit)
     menu.append(exittray)
 
     menu.show_all()
@@ -132,12 +125,11 @@ def runGtk():
 
 
 async def main():
-    print('Running Razer Tray...')
-
+    print("Running Razer Tray...")
     indicator = appindicator.Indicator.new(
         "myrazertray",
         r"/home/icespite/Work/PycharmProjects/RazerViperUltimate-Battery-Status/razer-logo.png",
-        appindicator.IndicatorCategory.APPLICATION_STATUS
+        appindicator.IndicatorCategory.APPLICATION_STATUS,
     )
     indicator.set_status(appindicator.IndicatorStatus.ACTIVE)
 
@@ -148,8 +140,22 @@ async def main():
     x.start()
     await refreshBatteryStatus(razer_command)
 
-    print('Closing Razer Tray...')
+    print("Closing Razer Tray...")
 
 
-if __name__ == '__main__':
+def clearOldDaemon():
+    f = os.popen("ps -ef |grep openrazer-daemon")
+    print(f.read())
+    f = os.popen("ps -ef |grep openrazer-daemon |wc -l")
+    old_daemon_num = int(f.read())
+    if old_daemon_num > 2:
+        print("clear old daemon whic number is {}".format(old_daemon_num))
+        os.system("killall openrazer-daemon")
+        time.sleep(2)
+    f = os.popen("ps -ef |grep openrazer-daemon")
+    print(f.read())
+
+
+if __name__ == "__main__":
+    clearOldDaemon()
     asyncio.run(main())
