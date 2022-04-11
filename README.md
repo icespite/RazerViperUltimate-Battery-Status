@@ -1,7 +1,12 @@
-> forked from [razer-battery-status](https://github.com/Patrick9263/razer-battery-status)
+# How to run
+
+1. install [openrazer driver](https://github.com/openrazer/openrazer)
+2. change`/home/icespite/Work/PycharmProjects/RazerViperUltimate-Battery-Status/razer-logo.png` to your project path
+3. run `python razerBattery`
+
 
 # TODO
 
-- [x] add Razer Viper Ultimate (Wired) support
-- [x] fix power equal zero when change to wired
+- [X] add Razer Viper Ultimate (Wired) support
+- [X] fix power equal zero when change to wired
 - [ ] add confirmation on notification

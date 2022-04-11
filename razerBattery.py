@@ -1,127 +1,108 @@
 #!/bin/env python3
+from re import S
 import time
-from gi.repository import Gtk as gtk, AppIndicator3 as appindicator
-from plyer import notification
-import threading
-import asyncio
-from openrazer.client import DeviceManager
 import gi
-import os
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("AppIndicator3", "0.1")
+from gi.repository import Gtk as gtk, AppIndicator3 as appindicator, GObject
+from plyer import notification
+import threading
+from openrazer.client import DeviceManager
+import os
 
 LOW_POWER = 46
 REFRESH_TIME_INTERVAL = 3
 
 
-class TrackStatus:
+class RazerStatus(threading.Thread):
+    stopthread = threading.Event()
+
     def __init__(self):
-        self.isRunning = True
-        self.isWarned = False
+        threading.Thread.__init__(self)
+        self.battery_level = -1
+        self.is_charging = False
+        self.name = ""
+        self.haveNotification = False
 
-    def getIsRunning(self):
-        return self.isRunning
+    def run(self):
+        while not self.stopthread.is_set():
+            battery_level_before = self.battery_level
+            self.getBatteryStatus()
+            global RAZER_STATUS_LABEL
+            RAZER_STATUS_LABEL.set_label(
+                "{} {}% {}".format(
+                    self.name,
+                    str(self.battery_level),
+                    "charging" if self.is_charging else "not charging",
+                )
+            )
+            # If you charge the mouse, the driver does not recognize it immediately.
+            if abs(battery_level_before - self.battery_level) > 10:
+                time.sleep(3)
+                continue
+            # print(
+            #     "{} {}% {}".format(
+            #         self.name,
+            #         str(self.battery_level),
+            #         "charging" if self.is_charging else "not charging",
+            #     )
+            # )
+            self.sendNotification()
+            time.sleep(2)
 
-    def setNotRunning(self):
-        self.isRunning = False
+    def sendNotification(self):
+        if (
+            not self.is_charging
+            and self.battery_level >= 0
+            and self.battery_level < LOW_POWER
+            and not self.haveNotification
+        ):
+            notification.notify(
+                title="Razer Mouse Low Battery",
+                message="{}%".format(self.battery_level),
+                app_icon=r"/home/icespite/Work/PycharmProjects/RazerViperUltimate-Battery-Status/razer-logo.png",
+                timeout=60,
+            )
+            self.haveNotification = True
 
-    def setIsWarned(self, isWarned):
-        self.isWarned = isWarned
-
-    def getIsWarned(self):
-        return self.isWarned
-
-
-status = TrackStatus()
-
-
-def getBatteryStats():
-    try:
-        device_manager = DeviceManager()
-    # print(device_manager.devices)
-        viper = None
-        for device in device_manager.devices:
-            print(device,device.name,device.battery_level)
-            if "Razer Viper Ultimate (Wired)" == device.name:
-                viper = device
-                break
-            elif "Razer Viper Ultimate (Wireless)" == device.name:
-                viper = device
-        print("-"*20)
-        if viper.battery_level == 0:
-            print("batteery_level equal zero")
-            os.system("openrazer-daemon -s")
-            time.sleep(3)
+    def getBatteryStatus(self):
+        try:
             device_manager = DeviceManager()
+            # print(device_manager.devices)
+            tmp_is_charging = False
+            tmp_battery_level = -1
+            tmp_name = ""
             for device in device_manager.devices:
-                print(device,device.name,device.battery_level)
-                if "Razer Viper Ultimate (Wired)" == device.name:
-                    viper = device
-                    break
-                elif "Razer Viper Ultimate (Wireless)" == device.name:
-                    viper = device
-        if None == viper:
-            return False, -1, "not found viper"
+                tmp_name = device.name
+                tmp_is_charging = device.is_charging | tmp_is_charging
+                tmp_battery_level = max(device.battery_level, tmp_battery_level)
+            self.is_charging = tmp_is_charging
+            self.battery_level = tmp_battery_level
+            self.name = tmp_name
+        except Exception as e:
+            print(e)
 
-        isCharging = False
-        if viper.is_charging:
-            isCharging = True
-        if viper.is_charging and viper.battery_level > LOW_POWER:
-            status.setIsWarned(False)
-
-        return isCharging, viper.battery_level, None
-    except Exception as e:
-        print(e)
-        return False, -1, e
+    def stop(self):
+        self.stopthread.set()
 
 
-def sendNotification(isCharging, percentage):
-    if not isCharging and percentage < LOW_POWER and not status.getIsWarned():
-        notification.notify(
-            # title of the notification,
-            title="Razer Mouse Low Battery",
-            # the body of the notification
-            message="{}%".format(percentage),
-            # creating icon for the notification
-            # we need to download a icon of ico file format
-            app_icon=r"/home/icespite/Work/PycharmProjects/RazerViperUltimate-Battery-Status/razer-logo.png",
-            # the notification stays for 10sec
-            timeout=60,
-        )
-        status.setIsWarned(True)
-
-
-async def refreshBatteryStatus(razer_command):
-    while status.getIsRunning():
-        (isCharging, percentage, errMsg) = getBatteryStats()
-        if errMsg == None:
-            chargeText = "Charging" if isCharging else "Not Charging"
-            new_label = "Razer Mouse: {} {}%".format(chargeText, str(percentage))
-            razer_command.set_label(new_label)
-            sendNotification(isCharging, percentage)
-            await asyncio.sleep(REFRESH_TIME_INTERVAL)
-        else:
-            new_label = "{}".format(errMsg)
-            razer_command.set_label(new_label)
-            await asyncio.sleep(REFRESH_TIME_INTERVAL)
+razerStatus = RazerStatus()
+RAZER_STATUS_LABEL = None
 
 
 def quit(_):
-    status.setNotRunning()
     print("Quitting...")
-    # openrazer-damon's number bigger than 1 will cause can't find wired device
-    device_manager = DeviceManager()
-    device_manager.stop_daemon()
+    razerStatus.stop()
     gtk.main_quit()
 
 
 def menu():
     menu = gtk.Menu()
 
-    razer_command = gtk.MenuItem()
-    razer_command.set_label(str(getBatteryStats()[1]))
-    menu.append(razer_command)
+    razer_status_label = gtk.MenuItem()
+    razer_status_label.set_label("loading...")
+    menu.append(razer_status_label)
 
     exittray = gtk.MenuItem()
     exittray.set_label("Exit Tray")
@@ -129,14 +110,10 @@ def menu():
     menu.append(exittray)
 
     menu.show_all()
-    return (menu, razer_command)
+    return (menu, razer_status_label)
 
 
-def runGtk():
-    gtk.main()
-
-
-async def main():
+def main():
     print("Running Razer Tray...")
     indicator = appindicator.Indicator.new(
         "myrazertray",
@@ -144,16 +121,13 @@ async def main():
         appindicator.IndicatorCategory.APPLICATION_STATUS,
     )
     indicator.set_status(appindicator.IndicatorStatus.ACTIVE)
-
-    (myMenu, razer_command) = menu()
+    global RAZER_STATUS_LABEL
+    (myMenu, RAZER_STATUS_LABEL) = menu()
     indicator.set_menu(myMenu)
-
-    x = threading.Thread(target=runGtk)
-    x.start()
-    await refreshBatteryStatus(razer_command)
-
-    print("Closing Razer Tray...")
+    razerStatus.start()
+    gtk.main()
     return
+
 
 def clearOldDaemon():
     f = os.popen("ps -ef |grep openrazer-daemon")
@@ -161,7 +135,7 @@ def clearOldDaemon():
     f = os.popen("ps -ef |grep openrazer-daemon |wc -l")
     old_daemon_num = int(f.read())
     if old_daemon_num > 2:
-        print("clear old daemon whic number is {}".format(old_daemon_num))
+        print("clear old daemon which number is {}".format(old_daemon_num))
         os.system("killall openrazer-daemon")
         time.sleep(2)
     f = os.popen("ps -ef |grep openrazer-daemon")
@@ -169,5 +143,6 @@ def clearOldDaemon():
 
 
 if __name__ == "__main__":
-    clearOldDaemon()
-    asyncio.run(main())
+    # Sometimes clearOldDaemon can help you solve the problem.
+    # clearOldDaemon()
+    main()
